@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Document Verifier</title>
+  <style>
+    :root { --bg:#e8f0fe; --sidebar:#004d99; --button:#0066cc; --button-hover:#0055aa; --primary:#007BFF; --border:#cbd5e1; --text:#0f172a; --brand:#c1121f; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);display:flex;flex-direction:column;height:100vh;color:var(--text)}
+
+    /* Top red bar: thicker + centered label */
+    .topbar{
+      background:var(--brand);
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      height:56px;              /* thicker bar */
+      font-weight:800;
+      font-size:20px;
+      letter-spacing:.2px;
+    }
+
+    .app{display:flex;flex:1;min-height:0}
+
+    /* Sidebar + content */
+    .sidebar{width:260px;background:var(--sidebar);color:#fff;display:flex;flex-direction:column;padding:20px}
+    /* removed the "Verifier" header */
+
+    .sidebar button{background:var(--button);color:#fff;border:none;margin:6px 0;padding:10px;border-radius:6px;cursor:pointer;text-align:left;font-size:14px}
+    .sidebar button:hover{background:var(--button-hover)}
+    .content{flex:1;padding:40px;overflow:auto}
+    .section{display:none}.section.active{display:block}
+    input[type="file"],input[type="text"],input[type="password"]{margin:10px 0;width:100%;padding:10px;border-radius:6px;border:1px solid var(--border);font-size:14px}
+    button.action{background:var(--primary);color:#fff;border:none;padding:10px 20px;border-radius:8px;margin-top:10px;cursor:pointer;font-size:14px}
+    #status{margin-top:18px;font-weight:bold;white-space:pre-wrap;min-height:1.2em}
+    #nav{display:none}
+    a.download{text-decoration:none}
+
+    /* Minimal about box lower down */
+    .about{margin-top:60px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:16px;max-width:640px}
+    .about h4{margin:0 0 8px 0}
+    .about ul{margin:8px 0 0 18px;padding:0}
+  </style>
+</head>
+<body>
+  <div class="topbar">DocVerify</div>
+
+  <div class="app">
+    <div class="sidebar">
+      <!-- Removed the "Verifier" heading -->
+      <div id="auth">
+        <input type="text" id="username" placeholder="Username" autocomplete="username" />
+        <input type="password" id="password" placeholder="Password" autocomplete="current-password" />
+        <button onclick="signup()">Signup</button>
+        <button onclick="login()">Login</button>
+      </div>
+
+      <div id="nav">
+        <button onclick="showSection('uploadSection')">Store/Verify Document</button>
+        <button onclick="showSection('docsSection'); loadDocuments()">My Documents</button>
+        <button onclick="logout()">Logout</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="uploadSection" class="section">
+        <h3>Store or Verify Document</h3>
+        <input type="file" id="fileInput" />
+        <button class="action" onclick="storeDocument()">Save Document</button>
+        <button class="action" onclick="verifyDocument()">Verify Document</button>
+      </div>
+
+      <div id="docsSection" class="section">
+        <h3>My Documents</h3>
+        <ul id="docList"></ul>
+      </div>
+
+      <div id="status"></div>
+
+      <!-- Minimal “What is DocVerify?” section in the empty space below -->
+      <div class="about">
+        <h4>What is DocVerify?</h4>
+        <div>It is a simple tool to save and check your important files.</div>
+        <ul>
+          <li>Keep proof your file hasn't been changed</li>
+          <li>Download the files you uploaded here anytime</li>
+          <li>Check when you uploaded the file</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Put your deployed Apps Script Web App URL here:
+    const execURL = "https://script.google.com/macros/s/AKfycbxc0nL6VrO6imlIDicIQW7_JPqF9bxlRPeevWbpate6WOWz_W34DQTWTHmFKn2vKFDGOQ/exec";
+
+    const setStatus = (m="") => document.getElementById("status").innerText = m;
+    const cb = () => `_=${Date.now()}`;
+    let currentUser = null;
+
+    function showSection(id){
+      if(!currentUser){ setStatus("Please login first."); return; }
+      document.querySelectorAll(".section").forEach(el=>el.classList.remove("active"));
+      document.getElementById(id).classList.add("active");
+      setStatus("");
+    }
+    function logout(){
+      currentUser=null;
+      document.getElementById("auth").style.display="block";
+      document.getElementById("nav").style.display="none";
+      document.querySelectorAll(".section").forEach(el=>el.classList.remove("active"));
+      setStatus("Logged out.");
+    }
+
+    async function getHash(file){
+      const buf = await file.arrayBuffer();
+      const h = await crypto.subtle.digest("SHA-256", buf);
+      return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,"0")).join("");
+    }
+    function fileToBase64(file){
+      return new Promise((resolve,reject)=>{
+        const r = new FileReader();
+        r.onload  = () => resolve(r.result.split(",")[1]); // strip data:mime;base64,
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+
+    // ---- Signup (auto-login on success)
+    async function signup(){
+      const u=document.getElementById("username").value.trim();
+      const p=document.getElementById("password").value.trim();
+      if(!u||!p) return alert("Enter both fields.");
+      try{
+        setStatus("Signing up...");
+        const r=await fetch(`${execURL}?action=signup&username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}&${cb()}`);
+        const j=await r.json();
+        if (j.status==="success"){
+          // auto-login flow
+          currentUser=u;
+          document.getElementById("auth").style.display="none";
+          document.getElementById("nav").style.display="block";
+          showSection("uploadSection");
+          setStatus("Signed up and logged in!");
+        } else if (j.status==="exists"){
+          setStatus("Username exists! Try logging in.");
+        } else {
+          setStatus(`Signup error: ${j.status||"unknown"}`);
+        }
+      }catch{ setStatus("Network error during signup."); }
+    }
+
+    // ---- Login
+    async function login(){
+      const u=document.getElementById("username").value.trim();
+      const p=document.getElementById("password").value.trim();
+      if(!u||!p) return alert("Enter both fields.");
+      try{
+        setStatus("Logging in...");
+        const r=await fetch(`${execURL}?action=login&username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}&${cb()}`);
+        const j=await r.json();
+        if(j.status==="success"){
+          currentUser=u;
+          document.getElementById("auth").style.display="none";
+          document.getElementById("nav").style.display="block";
+          showSection("uploadSection");
+          setStatus("Logged in!");
+        } else setStatus("Invalid credentials");
+      }catch{ setStatus("Network error during login."); }
+    }
+
+    // ---- Store (POST; progress)
+    async function storeDocument(){
+      if(!currentUser) return setStatus("Please login first.");
+      const file = document.getElementById("fileInput").files[0];
+      if(!file) return alert("Select a file first.");
+
+      try{
+        setStatus("Storing...");
+        const [hash, b64] = await Promise.all([getHash(file), fileToBase64(file)]);
+        const body = new URLSearchParams({
+          action: "store",
+          username: currentUser,
+          hash,
+          filename: file.name,
+          filedata: b64,
+          mimetype: file.type || ""
+        });
+        const r = await fetch(execURL, { method:"POST", body });
+        const j = await r.json();
+        if(j.status==="stored"){ setStatus("Stored!"); await loadDocuments(); }
+        else if(j.status==="exists"){ setStatus("Already Exists!"); await loadDocuments(); }
+        else setStatus(`Error storing: ${j.status||"unknown"}`);
+      }catch(e){
+        console.error(e);
+        setStatus("Network error while storing.");
+      }
+    }
+
+    // ---- Verify (GET; progress)
+    async function verifyDocument(){
+      if(!currentUser) return setStatus("Please login first.");
+      const file=document.getElementById("fileInput").files[0];
+      if(!file) return alert("Select a file first.");
+      try{
+        setStatus("Verifying...");
+        const hash=await getHash(file);
+        const r=await fetch(`${execURL}?action=verify&username=${encodeURIComponent(currentUser)}&hash=${hash}&${cb()}`);
+        const j=await r.json();
+        setStatus(j.status==="exists"?"Document Verified!":j.status==="not found"?"Not Found!":`Error verifying: ${j.status||"unknown"}`);
+      }catch{ setStatus("Network error while verifying."); }
+    }
+
+    // ---- My Documents (links + date-only; progress)
+    async function loadDocuments(){
+      if(!currentUser) return setStatus("Please login first.");
+      const ul=document.getElementById("docList");
+      try{
+        setStatus("Loading documents...");
+        const r=await fetch(`${execURL}?action=getdocs&username=${encodeURIComponent(currentUser)}&${cb()}`);
+        const j=await r.json();
+        if(j.status==="ok"){
+          if(!Array.isArray(j.documents)||j.documents.length===0){ ul.innerHTML="<li>No documents found</li>"; setStatus(""); return; }
+          ul.innerHTML = j.documents.map(d=>{
+            const name = d.filename || "Unnamed file";
+            const date = d.date || "";
+            const id   = (d.fileId||"").trim();
+            return id
+              ? `<li><a class="download" href="https://drive.google.com/uc?export=download&id=${encodeURIComponent(id)}" target="_blank" rel="noopener" download>${name}</a> — ${date}</li>`
+              : `<li>${name} — ${date}</li>`;
+          }).join("");
+          setStatus("");
+        } else {
+          ul.innerHTML = `<li>Error loading documents (${j.status}${j.message?": "+j.message:""})</li>`;
+          setStatus("");
+        }
+      }catch{
+        ul.innerHTML = "<li>Error loading documents (network)</li>";
+        setStatus("");
+      }
+    }
+  </script>
+</body>
+</html>
